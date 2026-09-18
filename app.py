@@ -1,5 +1,12 @@
 import streamlit as st
+import duckdb
 
-st.title("Hello, World!")
+st.title("Stlite + DuckDB")
 
-st.write("This Streamlit app is running in the browser.")
+result = duckdb.sql("""
+    SELECT
+        42 AS answer,
+        'Hello from DuckDB!' AS message
+""")
+
+st.dataframe(result.df())
