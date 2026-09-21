@@ -72,18 +72,36 @@
         const status = document.getElementById("duckdb-status");
         const resultRoot = document.getElementById("duckdb-result");
 
-        async function runDuckDBDemo() {
-            status.textContent = "Loading DuckDB-Wasm bundle…";
-
+        async function createDuckDB() {
             const bundles = duckdb.getJsDelivrBundles();
             const bundle = await duckdb.selectBundle(bundles);
             const worker = new Worker(bundle.mainWorker, { type: "module" });
             const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+            await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+            return { db, worker };
+        }
+
+        async function destroyDuckDB(db, worker, runError) {
+            try {
+                await db.terminate();
+            } catch (cleanupError) {
+                if (!runError) {
+                    throw cleanupError;
+                }
+                console.warn("DuckDB-Wasm cleanup failed after an earlier error.", cleanupError);
+            } finally {
+                worker.terminate();
+            }
+        }
+
+        async function runDuckDBDemo() {
+            status.textContent = "Loading DuckDB-Wasm bundle…";
+
+            const { db, worker } = await createDuckDB();
             let connection;
             let runError;
 
             try {
-                await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
                 connection = await db.connect();
 
                 const result = await connection.query(`
@@ -138,23 +156,14 @@
                     }
                 }
 
-                try {
-                    await db.terminate();
-                } catch (cleanupError) {
-                    if (!runError) {
-                        throw cleanupError;
-                    }
-                    console.warn("DuckDB-Wasm cleanup failed after an earlier error.", cleanupError);
-                }
-
-                worker.terminate();
+                await destroyDuckDB(db, worker, runError);
             }
         }
 
         runDuckDBDemo().catch((error) => {
             console.error(error);
             status.textContent = "DuckDB-Wasm demo failed.";
-            resultRoot.textContent = error instanceof Error ? error.message : String(error);
+            resultRoot.textContent = "Check the browser console for technical details.";
         });
     </script>
 
