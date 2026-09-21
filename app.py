@@ -1,12 +1,11 @@
 import streamlit as st
-import duckdb
 
-st.title("Stlite + DuckDB")
+st.title("Stlite + DuckDB-Wasm")
 
-result = duckdb.sql("""
-    SELECT
-        42 AS answer,
-        'Hello from DuckDB!' AS message
-""")
+st.write("This Streamlit app runs in Pyodide through Stlite.")
+st.info(
+    "DuckDB queries run separately in the browser via the DuckDB-Wasm "
+    "JavaScript module loaded by index.html."
+)
 
-st.dataframe(result.df())
+st.code("SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message", language="sql")

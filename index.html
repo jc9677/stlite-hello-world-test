@@ -12,6 +12,35 @@
         href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.1/build/stlite.css"
     />
 
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 1.5rem;
+            background: #f6f8fa;
+        }
+
+        .demo-panel {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            border: 1px solid #d0d7de;
+            border-radius: 0.5rem;
+            background: #fff;
+        }
+
+        table {
+            border-collapse: collapse;
+            margin-top: 0.75rem;
+        }
+
+        th,
+        td {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #d0d7de;
+            text-align: left;
+        }
+    </style>
+
     <script
         type="module"
         src="https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.1/build/stlite.js">
@@ -21,6 +50,74 @@
 <body>
 
     <streamlit-app src="./app.py"></streamlit-app>
+
+    <section class="demo-panel">
+        <h2>DuckDB-Wasm runs in JavaScript</h2>
+        <p>
+            Stlite keeps the Streamlit app pyodide-based. DuckDB-Wasm is loaded
+            in JavaScript here because Pyodide cannot import the browser's
+            JavaScript DuckDB-Wasm module as Python <code>duckdb</code>.
+        </p>
+        <div id="duckdb-status">Running DuckDB-Wasm query…</div>
+        <div id="duckdb-result"></div>
+    </section>
+
+    <script type="module">
+        import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/+esm";
+
+        const status = document.getElementById("duckdb-status");
+        const resultRoot = document.getElementById("duckdb-result");
+
+        async function runDuckDBDemo() {
+            status.textContent = "Loading DuckDB-Wasm bundle…";
+
+            const bundles = duckdb.getJsDelivrBundles();
+            const bundle = await duckdb.selectBundle(bundles);
+            const worker = new Worker(bundle.mainWorker);
+            const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+
+            await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+
+            const connection = await db.connect();
+            const result = await connection.query(`
+                SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message
+            `);
+            const rows = result.toArray();
+
+            status.textContent = "DuckDB-Wasm query result:";
+            resultRoot.innerHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>answer</th>
+                            <th>message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows
+                            .map(
+                                (row) => `
+                                    <tr>
+                                        <td>${row.answer}</td>
+                                        <td>${row.message}</td>
+                                    </tr>
+                                `
+                            )
+                            .join("")}
+                    </tbody>
+                </table>
+            `;
+
+            await connection.close();
+            await db.terminate();
+        }
+
+        runDuckDBDemo().catch((error) => {
+            console.error(error);
+            status.textContent = "DuckDB-Wasm failed to load.";
+            resultRoot.textContent = error instanceof Error ? error.message : String(error);
+        });
+    </script>
 
 </body>
 </html>
