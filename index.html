@@ -77,7 +77,7 @@
 
             const bundles = duckdb.getJsDelivrBundles();
             const bundle = await duckdb.selectBundle(bundles);
-            const worker = new Worker(bundle.mainWorker);
+            const worker = new Worker(bundle.mainWorker, { type: "module" });
             const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
 
             try {
