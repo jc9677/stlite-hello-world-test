@@ -5,7 +5,7 @@
     <meta name="viewport"
           content="width=device-width, initial-scale=1.0">
 
-    <title>My Stlite App</title>
+    <title>Stlite + DuckDB-Wasm</title>
 
     <link
         rel="stylesheet"
@@ -63,6 +63,8 @@
     </section>
 
     <script type="module">
+        // DuckDB-Wasm is a browser-side JavaScript module, so it is loaded here
+        // instead of from the Pyodide-based Streamlit app.
         import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/+esm";
 
         const status = document.getElementById("duckdb-status");
@@ -79,37 +81,42 @@
             await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
 
             const connection = await db.connect();
-            const result = await connection.query(`
-                SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message
-            `);
-            const rows = result.toArray();
 
-            status.textContent = "DuckDB-Wasm query result:";
-            resultRoot.innerHTML = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>answer</th>
-                            <th>message</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rows
-                            .map(
-                                (row) => `
-                                    <tr>
-                                        <td>${row.answer}</td>
-                                        <td>${row.message}</td>
-                                    </tr>
-                                `
-                            )
-                            .join("")}
-                    </tbody>
-                </table>
-            `;
+            try {
+                const result = await connection.query(`
+                    SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message
+                `);
+                const rows = result.toArray().map((row) =>
+                    typeof row.toJSON === "function" ? row.toJSON() : row
+                );
 
-            await connection.close();
-            await db.terminate();
+                status.textContent = "DuckDB-Wasm query result:";
+                resultRoot.innerHTML = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>answer</th>
+                                <th>message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows
+                                .map(
+                                    (row) => `
+                                        <tr>
+                                            <td>${row.answer}</td>
+                                            <td>${row.message}</td>
+                                        </tr>
+                                    `
+                                )
+                                .join("")}
+                        </tbody>
+                    </table>
+                `;
+            } finally {
+                await connection.close();
+                await db.terminate();
+            }
         }
 
         runDuckDBDemo().catch((error) => {
