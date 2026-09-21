@@ -79,9 +79,11 @@
             const bundle = await duckdb.selectBundle(bundles);
             const worker = new Worker(bundle.mainWorker, { type: "module" });
             const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+            let isInstantiated = false;
 
             try {
                 await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+                isInstantiated = true;
 
                 const connection = await db.connect();
                 try {
@@ -126,7 +128,9 @@
                     await connection.close();
                 }
             } finally {
-                await db.terminate();
+                if (isInstantiated) {
+                    await db.terminate();
+                }
                 worker.terminate();
             }
         }
