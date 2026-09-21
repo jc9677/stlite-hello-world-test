@@ -79,58 +79,74 @@
             const bundle = await duckdb.selectBundle(bundles);
             const worker = new Worker(bundle.mainWorker, { type: "module" });
             const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
-            let isInstantiated = false;
+            let connection;
+            let runError;
 
             try {
                 await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-                isInstantiated = true;
+                connection = await db.connect();
 
-                const connection = await db.connect();
-                try {
-                    const result = await connection.query(`
-                        SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message
-                    `);
-                    const rows = result.toArray().map((row) =>
-                        typeof row.toJSON === "function" ? row.toJSON() : row
-                    );
-                    const table = document.createElement("table");
-                    const thead = document.createElement("thead");
-                    const headRow = document.createElement("tr");
-                    const tbody = document.createElement("tbody");
+                const result = await connection.query(`
+                    SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message
+                `);
+                const columns = result.schema.fields.map((field) => field.name);
+                const rows = result.toArray().map((row) =>
+                    typeof row.toJSON === "function" ? row.toJSON() : row
+                );
+                const table = document.createElement("table");
+                const thead = document.createElement("thead");
+                const headRow = document.createElement("tr");
+                const tbody = document.createElement("tbody");
 
-                    status.textContent = "DuckDB-Wasm query result:";
-                    resultRoot.replaceChildren();
+                status.textContent = "DuckDB-Wasm query result:";
+                resultRoot.replaceChildren();
 
-                    for (const header of ["answer", "message"]) {
-                        const heading = document.createElement("th");
-                        heading.textContent = header;
-                        headRow.appendChild(heading);
-                    }
-
-                    thead.appendChild(headRow);
-
-                    for (const row of rows) {
-                        const tableRow = document.createElement("tr");
-
-                        for (const value of [row.answer, row.message]) {
-                            const cell = document.createElement("td");
-                            cell.textContent = String(value);
-                            tableRow.appendChild(cell);
-                        }
-
-                        tbody.appendChild(tableRow);
-                    }
-
-                    table.appendChild(thead);
-                    table.appendChild(tbody);
-                    resultRoot.appendChild(table);
-                } finally {
-                    await connection.close();
+                for (const column of columns) {
+                    const heading = document.createElement("th");
+                    heading.textContent = column;
+                    headRow.appendChild(heading);
                 }
+
+                thead.appendChild(headRow);
+
+                for (const row of rows) {
+                    const tableRow = document.createElement("tr");
+
+                    for (const column of columns) {
+                        const cell = document.createElement("td");
+                        cell.textContent = String(row[column]);
+                        tableRow.appendChild(cell);
+                    }
+
+                    tbody.appendChild(tableRow);
+                }
+                table.appendChild(thead);
+                table.appendChild(tbody);
+                resultRoot.appendChild(table);
+            } catch (error) {
+                runError = error;
+                throw error;
             } finally {
-                if (isInstantiated) {
-                    await db.terminate();
+                if (connection) {
+                    try {
+                        await connection.close();
+                    } catch (cleanupError) {
+                        if (!runError) {
+                            throw cleanupError;
+                        }
+                        console.warn("DuckDB-Wasm connection cleanup failed after an earlier error.", cleanupError);
+                    }
                 }
+
+                try {
+                    await db.terminate();
+                } catch (cleanupError) {
+                    if (!runError) {
+                        throw cleanupError;
+                    }
+                    console.warn("DuckDB-Wasm cleanup failed after an earlier error.", cleanupError);
+                }
+
                 worker.terminate();
             }
         }
