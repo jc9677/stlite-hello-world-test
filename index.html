@@ -58,7 +58,9 @@
             in JavaScript here because Pyodide cannot import the browser's
             JavaScript DuckDB-Wasm module as Python <code>duckdb</code>.
         </p>
-        <div id="duckdb-status">Running DuckDB-Wasm query…</div>
+        <div id="duckdb-status" role="status" aria-live="polite">
+            Running DuckDB-Wasm query…
+        </div>
         <div id="duckdb-result"></div>
     </section>
 
@@ -78,44 +80,54 @@
             const worker = new Worker(bundle.mainWorker);
             const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
 
-            await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-
-            const connection = await db.connect();
-
             try {
-                const result = await connection.query(`
-                    SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message
-                `);
-                const rows = result.toArray().map((row) =>
-                    typeof row.toJSON === "function" ? row.toJSON() : row
-                );
+                await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
 
-                status.textContent = "DuckDB-Wasm query result:";
-                resultRoot.innerHTML = `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>answer</th>
-                                <th>message</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${rows
-                                .map(
-                                    (row) => `
-                                        <tr>
-                                            <td>${row.answer}</td>
-                                            <td>${row.message}</td>
-                                        </tr>
-                                    `
-                                )
-                                .join("")}
-                        </tbody>
-                    </table>
-                `;
+                const connection = await db.connect();
+                try {
+                    const result = await connection.query(`
+                        SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message
+                    `);
+                    const rows = result.toArray().map((row) =>
+                        typeof row.toJSON === "function" ? row.toJSON() : row
+                    );
+                    const table = document.createElement("table");
+                    const thead = document.createElement("thead");
+                    const headRow = document.createElement("tr");
+                    const tbody = document.createElement("tbody");
+
+                    status.textContent = "DuckDB-Wasm query result:";
+                    resultRoot.replaceChildren();
+
+                    for (const header of ["answer", "message"]) {
+                        const heading = document.createElement("th");
+                        heading.textContent = header;
+                        headRow.appendChild(heading);
+                    }
+
+                    thead.appendChild(headRow);
+
+                    for (const row of rows) {
+                        const tableRow = document.createElement("tr");
+
+                        for (const value of [row.answer, row.message]) {
+                            const cell = document.createElement("td");
+                            cell.textContent = String(value);
+                            tableRow.appendChild(cell);
+                        }
+
+                        tbody.appendChild(tableRow);
+                    }
+
+                    table.appendChild(thead);
+                    table.appendChild(tbody);
+                    resultRoot.appendChild(table);
+                } finally {
+                    await connection.close();
+                }
             } finally {
-                await connection.close();
                 await db.terminate();
+                worker.terminate();
             }
         }
 
