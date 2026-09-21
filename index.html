@@ -77,8 +77,14 @@
             const bundle = await duckdb.selectBundle(bundles);
             const worker = new Worker(bundle.mainWorker, { type: "module" });
             const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
-            await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-            return { db, worker };
+
+            try {
+                await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+                return { db, worker };
+            } catch (error) {
+                worker.terminate();
+                throw error;
+            }
         }
 
         async function destroyDuckDB(db, worker, runError) {
