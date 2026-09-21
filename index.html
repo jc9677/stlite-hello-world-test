@@ -72,8 +72,20 @@
         const status = document.getElementById("duckdb-status");
         const resultRoot = document.getElementById("duckdb-result");
 
+        const assetBase = new URL("./vendor/duckdb-wasm/", document.baseURI);
+
+        const bundles = {
+            mvp: {
+                mainModule: new URL("duckdb-mvp.wasm", assetBase).href,
+                mainWorker: new URL("duckdb-browser-mvp.worker.js", assetBase).href,
+            },
+            eh: {
+                mainModule: new URL("duckdb-eh.wasm", assetBase).href,
+                mainWorker: new URL("duckdb-browser-eh.worker.js", assetBase).href,
+            },
+        };
+
         async function createDuckDB() {
-            const bundles = duckdb.getJsDelivrBundles();
             const bundle = await duckdb.selectBundle(bundles);
             const worker = new Worker(bundle.mainWorker, { type: "module" });
             const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
@@ -110,9 +122,30 @@
             try {
                 connection = await db.connect();
 
+
+
+                const parquetUrl = new URL(
+                    "./weather.parquet",
+                    document.baseURI
+                ).href;
+
+                await db.registerFileURL(
+                    "weather.parquet",
+                    parquetUrl,
+                    duckdb.DuckDBDataProtocol.HTTP,
+                    false
+                );
+
+                // const result = await connection.query(`
+                //     SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message
+                // `);
+
                 const result = await connection.query(`
-                    SELECT 42 AS answer, 'Hello from DuckDB-Wasm!' AS message
+                    SELECT * FROM read_parquet('weather.parquet')
                 `);
+
+                console.log("===================================================================");
+                console.log(result);
                 const columns = result.schema.fields.map((field) => field.name);
                 const rows = result.toArray().map((row) =>
                     typeof row.toJSON === "function" ? row.toJSON() : row
