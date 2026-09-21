@@ -133,7 +133,7 @@
 
         runDuckDBDemo().catch((error) => {
             console.error(error);
-            status.textContent = "DuckDB-Wasm failed to load.";
+            status.textContent = "DuckDB-Wasm demo failed.";
             resultRoot.textContent = error instanceof Error ? error.message : String(error);
         });
     </script>
