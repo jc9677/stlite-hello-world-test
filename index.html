@@ -12,19 +12,23 @@
         href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.1/build/stlite.css"
     />
 
-    <script
-        type="module"
-        src="https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.1/build/stlite.js">
-    </script>
 </head>
 
 <body>
 
-    <streamlit-app src="./app.py">
-        <app-requirements>
-            duckdb
-        </app-requirements>
-    </streamlit-app>
+    <div id="root"></div>
+
+    <script type="module">
+        import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@1.9.1/build/stlite.js";
+
+        mount({
+            entrypoint: "app.py",
+            files: {
+                "app.py": { url: "./app.py" },
+            },
+            prebuiltPackageNames: ["duckdb"],
+        }, document.getElementById("root"));
+    </script>
 
 </body>
 </html>
