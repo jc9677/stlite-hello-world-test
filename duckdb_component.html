@@ -309,7 +309,6 @@
             await db.open({
                 path: databasePath,
                 accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
-                opfs: { fileHandling: "auto" },
             });
             connection = await db.connect();
         }
@@ -370,6 +369,7 @@
         }
 
         async function cacheSummary() {
+            const outputPath = "opfs://cache/rain_summary.parquet";
             const query = `
                 COPY (
                     SELECT RainTomorrow AS rain_tomorrow,
@@ -378,15 +378,19 @@
                     FROM ${tableName}
                     GROUP BY ALL
                     ORDER BY RainTomorrow
-                ) TO 'opfs://cache/rain_summary.parquet'
+                ) TO '${outputPath}'
                 (FORMAT PARQUET)
             `;
-            await connection.query(query);
-            await connection.query("CHECKPOINT");
-            await runQuery(
-                "SELECT * FROM 'opfs://cache/rain_summary.parquet'",
-                "Wrote and reopened the derived Parquet cache..."
-            );
+            await db.registerOPFSFileName(outputPath);
+            try {
+                await connection.query(query);
+                await runQuery(
+                    `SELECT * FROM '${outputPath}'`,
+                    "Wrote and reopened the derived Parquet cache..."
+                );
+            } finally {
+                await db.dropFile(outputPath);
+            }
         }
 
         async function resetDatabase() {
