@@ -41,6 +41,10 @@ The first load materializes `weather.parquet` into
 local database without reloading the source table. OPFS is a browser cache and
 working store, not a backup or cross-device data store.
 
+The service worker caches the pinned Stlite and DuckDB-Wasm jsDelivr assets
+after the first load. Subsequent loads reuse those assets from the browser's
+Cache Storage; the first load still requires network access.
+
 ## Verify locally with native DuckDB
 
 The local environment can inspect the same dataset without involving Pyodide:
