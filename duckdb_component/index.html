@@ -50,6 +50,27 @@
             Streamlit.setComponentValue({ type, ...details });
         }
 
+        function resolveAssetUrl(path) {
+            const candidates = [];
+            const streamlitUrl = new URLSearchParams(window.location.search).get("streamlitUrl");
+
+            if (streamlitUrl) {
+                candidates.push(streamlitUrl);
+            }
+            if (document.referrer) {
+                candidates.push(document.referrer);
+            }
+
+            for (const candidate of candidates) {
+                try {
+                    return new URL(path, candidate).href;
+                } catch {
+                }
+            }
+
+            throw new Error(`Unable to resolve the static asset URL for ${path}.`);
+        }
+
         function jsonValue(value) {
             if (typeof value === "bigint") {
                 return Number(value);
@@ -117,7 +138,7 @@
             const exists = Number(tableExists.toArray()[0].table_count) > 0;
 
             if (!exists) {
-                const parquetUrl = new URL("../weather.parquet", document.baseURI).href;
+                const parquetUrl = resolveAssetUrl("weather.parquet");
                 await db.registerFileURL(
                     "weather.parquet",
                     parquetUrl,
