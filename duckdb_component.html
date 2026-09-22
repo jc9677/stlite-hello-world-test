@@ -221,8 +221,35 @@
         let connection;
 
         function pageUrl(path) {
-            const parentUrl = document.referrer || window.location.href;
-            return new URL(path, parentUrl).href;
+            const candidateUrls = [];
+
+            try {
+                candidateUrls.push(window.parent.location.href);
+            } catch (error) {
+                console.debug("Parent URL is not accessible.", error);
+            }
+
+            try {
+                candidateUrls.push(window.top.location.href);
+            } catch (error) {
+                console.debug("Top-level URL is not accessible.", error);
+            }
+
+            candidateUrls.push(document.referrer);
+
+            for (const candidateUrl of candidateUrls) {
+                if (!candidateUrl || candidateUrl.startsWith("about:")) {
+                    continue;
+                }
+
+                try {
+                    return new URL(path, candidateUrl).href;
+                } catch (error) {
+                    console.debug("Could not resolve asset URL.", error);
+                }
+            }
+
+            throw new Error("Unable to resolve the static asset URL.");
         }
 
         function setStatus(message, state = "") {
