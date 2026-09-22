@@ -104,7 +104,8 @@
         }
 
         .fact span,
-        #status {
+        #status,
+        #opfs-status {
             color: var(--muted);
             font: 0.75rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
         }
@@ -116,6 +117,28 @@
 
         #status[data-state="error"] {
             color: var(--coral);
+        }
+
+        .opfs-panel {
+            margin-top: 1.25rem;
+        }
+
+        .opfs-heading {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: baseline;
+            justify-content: space-between;
+        }
+
+        .opfs-heading h3 {
+            margin: 0;
+            font-size: 1.05rem;
+        }
+
+        .opfs-heading button {
+            padding: 0.4rem 0.6rem;
+            font-size: 0.72rem;
         }
 
         .result {
@@ -196,6 +219,22 @@
             <div class="fact"><strong>Storage</strong><span id="storage-path">Opening...</span></div>
         </div>
 
+        <section class="opfs-panel" aria-labelledby="opfs-heading">
+            <div class="opfs-heading">
+                <h3 id="opfs-heading">OPFS contents</h3>
+                <button id="opfs-refresh-button" class="secondary" type="button">Refresh contents</button>
+            </div>
+            <p id="opfs-status" role="status" aria-live="polite">Waiting for DuckDB...</p>
+            <div class="result">
+                <table aria-label="Origin Private File System contents">
+                    <thead>
+                        <tr><th>Path</th><th>Kind</th><th>Size</th><th>Modified</th></tr>
+                    </thead>
+                    <tbody id="opfs-body"></tbody>
+                </table>
+            </div>
+        </section>
+
         <div id="status" role="status" aria-live="polite">Starting DuckDB-Wasm...</div>
         <div id="result" class="result"></div>
         <pre id="sql" class="sql" aria-label="SQL query"></pre>
@@ -210,6 +249,8 @@
         import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm";
 
         const status = document.getElementById("status");
+        const opfsStatus = document.getElementById("opfs-status");
+        const opfsBody = document.getElementById("opfs-body");
         const resultRoot = document.getElementById("result");
         const sqlRoot = document.getElementById("sql");
         const buttons = [...document.querySelectorAll("button")];
@@ -262,6 +303,85 @@
                 return value.toString();
             }
             return value === null || value === undefined ? "" : String(value);
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === null) {
+                return "Unavailable";
+            }
+            if (bytes === 0) {
+                return "0 B";
+            }
+            const units = ["B", "KiB", "MiB", "GiB"];
+            const unitIndex = Math.min(
+                Math.floor(Math.log(bytes) / Math.log(1024)),
+                units.length - 1
+            );
+            return `${(bytes / 1024 ** unitIndex).toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+        }
+
+        function formatModified(timestamp) {
+            return timestamp === null ? "Unavailable" : new Date(timestamp).toLocaleString();
+        }
+
+        async function collectOPFSContents(directoryHandle, parentPath, rows) {
+            for await (const [name, handle] of directoryHandle.entries()) {
+                const path = parentPath ? `${parentPath}/${name}` : name;
+                if (handle.kind === "directory") {
+                    rows.push({ path: `${path}/`, kind: "Directory", bytes: null, modified: null });
+                    await collectOPFSContents(handle, path, rows);
+                    continue;
+                }
+
+                let bytes = null;
+                let modified = null;
+                try {
+                    const file = await handle.getFile();
+                    bytes = file.size;
+                    modified = file.lastModified;
+                } catch (error) {
+                    console.debug(`Could not read metadata for OPFS file ${path}.`, error);
+                }
+                rows.push({ path, kind: "File", bytes, modified });
+            }
+        }
+
+        async function refreshOPFS() {
+            opfsStatus.textContent = "Reading OPFS...";
+            try {
+                if (!navigator.storage || typeof navigator.storage.getDirectory !== "function") {
+                    throw new Error("This browser does not expose OPFS directory access.");
+                }
+                const root = await navigator.storage.getDirectory();
+                const rows = [];
+                await collectOPFSContents(root, "", rows);
+                rows.sort((left, right) => left.path.localeCompare(right.path));
+                opfsBody.replaceChildren();
+
+                if (rows.length === 0) {
+                    const row = opfsBody.insertRow();
+                    const cell = row.insertCell();
+                    cell.colSpan = 4;
+                    cell.textContent = "OPFS is empty.";
+                } else {
+                    for (const item of rows) {
+                        const row = opfsBody.insertRow();
+                        row.insertCell().textContent = item.path;
+                        row.insertCell().textContent = item.kind;
+                        row.insertCell().textContent = formatBytes(item.bytes);
+                        row.insertCell().textContent = formatModified(item.modified);
+                    }
+                }
+                opfsStatus.textContent = `${rows.length} OPFS entr${rows.length === 1 ? "y" : "ies"}.`;
+            } catch (error) {
+                console.error(error);
+                opfsBody.replaceChildren();
+                const row = opfsBody.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 4;
+                cell.textContent = error instanceof Error ? error.message : String(error);
+                opfsStatus.textContent = "OPFS contents unavailable.";
+            }
         }
 
         function renderResult(result) {
@@ -423,11 +543,13 @@
         document.getElementById("preview-button").addEventListener("click", () => runAction(runPreview));
         document.getElementById("cache-button").addEventListener("click", () => runAction(cacheSummary));
         document.getElementById("reset-button").addEventListener("click", () => runAction(resetDatabase));
+        document.getElementById("opfs-refresh-button").addEventListener("click", () => runAction(refreshOPFS));
 
         try {
             await startDatabase();
             await ensureWeatherTable();
             await runSummary();
+            await refreshOPFS();
         } catch (error) {
             console.error(error);
             setStatus(error instanceof Error ? error.message : String(error), "error");
