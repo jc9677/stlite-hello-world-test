@@ -57,6 +57,14 @@
             if (streamlitUrl) {
                 candidates.push(streamlitUrl);
             }
+            try {
+                candidates.push(window.parent.location.href);
+            } catch {
+            }
+            try {
+                candidates.push(window.top.location.href);
+            } catch {
+            }
             if (document.referrer) {
                 candidates.push(document.referrer);
             }
