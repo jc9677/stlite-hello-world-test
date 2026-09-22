@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DuckDB browser component</title>
+</head>
+<body>
+    <script type="module">
+        import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm";
+
+        const databasePath = "opfs://weather-demo-v2.duckdb";
+        const tableName = "weather";
+        let db;
+        let worker;
+        let connection;
+        let databaseReady = false;
+        let pendingCommand = null;
+        let lastCommandId = null;
+
+        const Streamlit = {
+            RENDER_EVENT: "streamlit:render",
+            setComponentReady() {
+                window.parent.postMessage({
+                    isStreamlitMessage: true,
+                    type: "streamlit:componentReady",
+                    apiVersion: 1,
+                }, "*");
+            },
+            setFrameHeight(height) {
+                window.parent.postMessage({
+                    isStreamlitMessage: true,
+                    type: "streamlit:setFrameHeight",
+                    height,
+                }, "*");
+            },
+            setComponentValue(value) {
+                window.parent.postMessage({
+                    isStreamlitMessage: true,
+                    type: "streamlit:setComponentValue",
+                    value: {
+                        type: "json",
+                        value: JSON.stringify(value),
+                    },
+                }, "*");
+            },
+        };
+
+        function sendEvent(type, details = {}) {
+            Streamlit.setComponentValue({ type, ...details });
+        }
+
+        function jsonValue(value) {
+            if (typeof value === "bigint") {
+                return Number(value);
+            }
+            if (value instanceof Date) {
+                return value.toISOString();
+            }
+            if (typeof value === "string") {
+                let normalized = value;
+                try {
+                    const parsed = JSON.parse(value);
+                    if (typeof parsed === "string") {
+                        normalized = parsed;
+                    }
+                } catch {
+                }
+                if (/^-?\d+(\.\d+)?$/.test(normalized)) {
+                    return Number(normalized);
+                }
+                return normalized;
+            }
+            return value;
+        }
+
+        function serializeResult(result) {
+            const columns = result.schema.fields.map((field) => field.name);
+            const rows = result.toArray().map((row) => {
+                const source = typeof row.toJSON === "function" ? row.toJSON() : row;
+                return Object.fromEntries(
+                    columns.map((column) => [column, jsonValue(source[column])])
+                );
+            });
+            return { columns, rows };
+        }
+
+        async function startDatabase() {
+            const bundles = duckdb.getJsDelivrBundles();
+            const bundle = await duckdb.selectBundle(bundles);
+            const workerUrl = URL.createObjectURL(
+                new Blob([`importScripts("${bundle.mainWorker}");`], {
+                    type: "text/javascript",
+                })
+            );
+
+            worker = new Worker(workerUrl);
+            db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+            try {
+                await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+            } finally {
+                URL.revokeObjectURL(workerUrl);
+            }
+            await db.open({
+                path: databasePath,
+                accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
+            });
+            connection = await db.connect();
+        }
+
+        async function ensureWeatherTable() {
+            const tableExists = await connection.query(`
+                SELECT count(*) AS table_count
+                FROM information_schema.tables
+                WHERE table_name = '${tableName}'
+            `);
+            const exists = Number(tableExists.toArray()[0].table_count) > 0;
+
+            if (!exists) {
+                const parquetUrl = new URL("../weather.parquet", document.baseURI).href;
+                await db.registerFileURL(
+                    "weather.parquet",
+                    parquetUrl,
+                    duckdb.DuckDBDataProtocol.HTTP,
+                    false
+                );
+                await connection.query(`
+                    CREATE TABLE ${tableName} AS
+                    SELECT * FROM read_parquet('weather.parquet')
+                `);
+                await connection.query("CHECKPOINT");
+                await db.dropFile("weather.parquet");
+            }
+        }
+
+        async function runQuery(query) {
+            const result = await connection.query(query);
+            return {
+                rows: Number(result.numRows ?? 0),
+                result: serializeResult(result),
+            };
+        }
+
+        function summaryQuery() {
+            return runQuery(`
+                SELECT
+                    count(*) AS rows,
+                    round(avg(Temp3pm), 1) AS avg_temp_3pm,
+                    round(avg(Humidity3pm), 1) AS avg_humidity_3pm,
+                    sum(CASE WHEN RainTomorrow = 'Yes' THEN 1 ELSE 0 END) AS rain_tomorrow
+                FROM ${tableName}
+            `);
+        }
+
+        async function refreshOPFS() {
+            const root = await navigator.storage.getDirectory();
+            const rows = [];
+            for await (const [name, handle] of root.entries()) {
+                if (handle.kind === "directory") {
+                    rows.push({ path: `${name}/`, kind: "Directory" });
+                    continue;
+                }
+                const file = await handle.getFile();
+                rows.push({
+                    path: name,
+                    kind: "File",
+                    bytes: file.size,
+                    modified: new Date(file.lastModified).toISOString(),
+                });
+            }
+            rows.sort((left, right) => left.path.localeCompare(right.path));
+            return rows;
+        }
+
+        async function runPreview() {
+            return runQuery(`
+                SELECT MinTemp, MaxTemp, Rainfall, Temp3pm, Humidity3pm, RainTomorrow
+                FROM ${tableName}
+                LIMIT 12
+            `);
+        }
+
+        async function cacheSummary() {
+            const outputPath = "opfs://cache/rain_summary.parquet";
+            await db.registerOPFSFileName(outputPath);
+            try {
+                await connection.query(`
+                    COPY (
+                        SELECT RainTomorrow AS rain_tomorrow,
+                               count(*) AS days,
+                               round(avg(Temp3pm), 1) AS avg_temp_3pm
+                        FROM ${tableName}
+                        GROUP BY ALL
+                        ORDER BY RainTomorrow
+                    ) TO '${outputPath}' (FORMAT PARQUET)
+                `);
+                return {
+                    path: outputPath,
+                    ...(await runQuery(`SELECT * FROM '${outputPath}'`)),
+                };
+            } finally {
+                await db.dropFile(outputPath);
+            }
+        }
+
+        async function resetDatabase() {
+            await connection.query(`DROP TABLE IF EXISTS ${tableName}`);
+            await connection.query("CHECKPOINT");
+            await ensureWeatherTable();
+            return summaryQuery();
+        }
+
+        async function runCommand(command) {
+            if (!command || command.id === lastCommandId) {
+                return;
+            }
+            lastCommandId = command.id;
+            const actions = {
+                summary: summaryQuery,
+                preview: runPreview,
+                cache: cacheSummary,
+                reset: resetDatabase,
+                opfs_refresh: async () => ({ opfs: await refreshOPFS() }),
+            };
+            try {
+                const details = await actions[command.action]();
+                sendEvent(command.action, { command_id: command.id, ...details });
+            } catch (error) {
+                console.error(error);
+                sendEvent("error", {
+                    command_id: command.id,
+                    message: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+
+        window.addEventListener("message", (event) => {
+            if (event.data?.type !== Streamlit.RENDER_EVENT) {
+                return;
+            }
+            const command = event.data.args?.command ?? null;
+            if (!databaseReady) {
+                pendingCommand = command;
+                return;
+            }
+            void runCommand(command);
+        });
+
+        Streamlit.setComponentReady();
+        Streamlit.setFrameHeight(1);
+
+        try {
+            await startDatabase();
+            await ensureWeatherTable();
+            const summary = await summaryQuery();
+            databaseReady = true;
+            sendEvent("ready", {
+                database: databasePath,
+                summary: summary.result,
+                opfs: await refreshOPFS(),
+            });
+            if (pendingCommand) {
+                void runCommand(pendingCommand);
+                pendingCommand = null;
+            }
+        } catch (error) {
+            console.error(error);
+            sendEvent("error", {
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    </script>
+</body>
+</html>

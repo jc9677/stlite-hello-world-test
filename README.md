@@ -4,9 +4,9 @@ This is a static GitHub Pages example of a Streamlit app that processes a
 Parquet file in the browser with DuckDB-Wasm. There is no Python server:
 
 ```text
-Streamlit app -> Stlite -> Pyodide
-												 |
-												 +-> HTML component -> DuckDB-Wasm worker -> OPFS
+Streamlit elements -> Stlite -> Pyodide
+														 |
+														 +-> headless component -> DuckDB-Wasm worker -> OPFS
 ```
 
 The Python app does not import `duckdb`. The `duckdb>=1.5.5` dependency in
@@ -28,17 +28,23 @@ not available from a `file://` page:
 python3 -m http.server 8000
 ```
 
-Open <http://localhost:8000> and use the controls in the Streamlit app:
+Open <http://localhost:8000/index.html> and use the native Streamlit controls:
 
 - **Run weather summary** runs an aggregate query over the persisted table.
 - **Preview rows** reads a small result set from DuckDB-Wasm.
 - **Cache summary to OPFS** writes a derived Parquet file to OPFS and reads it
 	back.
 - **Reset local database** drops and rebuilds the demo table.
+- **Refresh OPFS** lists the browser's persisted database and derived files.
 
-The first load materializes `weather.parquet` into
-`opfs://weather-demo.duckdb` and calls `CHECKPOINT`. Later loads reopen the
-local database without reloading the source table. OPFS is a browser cache and
+The visible controls, metrics, and tables are Streamlit elements. The
+headless browser component in `duckdb_component/index.html` receives commands,
+runs DuckDB-Wasm in a worker, and returns only compact JSON result sets and
+metadata. The source data and database never leave the browser.
+
+The first load materializes `weather.parquet` into the
+`opfs://weather-demo-v2.duckdb` database and calls `CHECKPOINT`. Later loads
+reopen the local database without reloading the source table. OPFS is a browser cache and
 working store, not a backup or cross-device data store.
 
 The service worker caches the pinned Stlite and DuckDB-Wasm jsDelivr assets
