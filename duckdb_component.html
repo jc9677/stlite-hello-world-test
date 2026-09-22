@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            color-scheme: light;
+            --ink: #1c252c;
+            --muted: #637078;
+            --line: #d7ddd9;
+            --paper: #fffdf8;
+            --teal: #176b68;
+            --teal-soft: #e5f2ef;
+            --coral: #c55b45;
+            font-family: Georgia, "Times New Roman", serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            color: var(--ink);
+            background: var(--paper);
+        }
+
+        main {
+            padding: 1.25rem;
+            border: 1px solid var(--line);
+            border-radius: 0.6rem;
+            background: var(--paper);
+        }
+
+        .eyebrow {
+            margin: 0 0 0.35rem;
+            color: var(--teal);
+            font: 700 0.72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        h2 {
+            margin: 0;
+            font-size: clamp(1.35rem, 3vw, 2rem);
+            line-height: 1.05;
+        }
+
+        .intro {
+            max-width: 48rem;
+            margin: 0.7rem 0 1rem;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .toolbar,
+        .facts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            align-items: center;
+        }
+
+        button {
+            padding: 0.55rem 0.75rem;
+            border: 1px solid var(--teal);
+            border-radius: 0.35rem;
+            color: white;
+            background: var(--teal);
+            font: 700 0.8rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+            cursor: pointer;
+        }
+
+        button.secondary {
+            color: var(--teal);
+            background: transparent;
+        }
+
+        button:disabled {
+            cursor: wait;
+            opacity: 0.55;
+        }
+
+        .facts {
+            margin: 1rem 0;
+        }
+
+        .fact {
+            min-width: 9rem;
+            padding: 0.65rem 0.8rem;
+            border-left: 3px solid var(--coral);
+            background: #f6f0e7;
+        }
+
+        .fact strong,
+        .fact span {
+            display: block;
+        }
+
+        .fact strong {
+            margin-bottom: 0.2rem;
+            font-size: 0.85rem;
+        }
+
+        .fact span,
+        #status {
+            color: var(--muted);
+            font: 0.75rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+
+        #status {
+            min-height: 1.4rem;
+            margin: 0.9rem 0 0;
+        }
+
+        #status[data-state="error"] {
+            color: var(--coral);
+        }
+
+        .result {
+            margin-top: 0.75rem;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+
+        th,
+        td {
+            padding: 0.55rem 0.65rem;
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        th {
+            color: var(--teal);
+            background: var(--teal-soft);
+            font: 700 0.72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+            text-transform: uppercase;
+        }
+
+        .sql {
+            margin: 1rem 0 0;
+            padding: 0.8rem;
+            overflow-x: auto;
+            border-radius: 0.35rem;
+            color: #e8f4ef;
+            background: #213238;
+            font: 0.75rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+            white-space: pre-wrap;
+        }
+
+        .note {
+            margin: 1rem 0 0;
+            color: var(--muted);
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+
+        @media (max-width: 520px) {
+            main {
+                padding: 1rem;
+            }
+
+            button {
+                flex: 1 1 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <p class="eyebrow">Browser data lab</p>
+        <h2>Query the weather dataset locally</h2>
+        <p class="intro">
+            DuckDB-Wasm reads the bundled Parquet file once, materializes it into
+            an OPFS database, and runs the summaries in a Web Worker. Reload the
+            page to see the persisted table reused without a server.
+        </p>
+
+        <div class="toolbar">
+            <button id="summary-button" type="button">Run weather summary</button>
+            <button id="preview-button" class="secondary" type="button">Preview rows</button>
+            <button id="cache-button" class="secondary" type="button">Cache summary to OPFS</button>
+            <button id="reset-button" class="secondary" type="button">Reset local database</button>
+        </div>
+
+        <div class="facts" aria-label="Runtime facts">
+            <div class="fact"><strong>Engine</strong><span>DuckDB-Wasm 1.32.0</span></div>
+            <div class="fact"><strong>Python UI</strong><span>Stlite + Pyodide</span></div>
+            <div class="fact"><strong>Storage</strong><span>opfs://weather-demo.duckdb</span></div>
+        </div>
+
+        <div id="status" role="status" aria-live="polite">Starting DuckDB-Wasm...</div>
+        <div id="result" class="result"></div>
+        <pre id="sql" class="sql" aria-label="SQL query"></pre>
+        <p class="note">
+            OPFS is origin-scoped browser storage, not a backup. Writes are
+            checkpointed explicitly, and the source Parquet remains part of the
+            static site.
+        </p>
+    </main>
+
+    <script type="module">
+        import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm";
+
+        const status = document.getElementById("status");
+        const resultRoot = document.getElementById("result");
+        const sqlRoot = document.getElementById("sql");
+        const buttons = [...document.querySelectorAll("button")];
+        const databasePath = "opfs://weather-demo.duckdb";
+        const tableName = "weather";
+
+        let db;
+        let worker;
+        let connection;
+
+        function pageUrl(path) {
+            const parentUrl = document.referrer || window.location.href;
+            return new URL(path, parentUrl).href;
+        }
+
+        function setStatus(message, state = "") {
+            status.textContent = message;
+            status.dataset.state = state;
+        }
+
+        function displayValue(value) {
+            if (typeof value === "bigint") {
+                return value.toString();
+            }
+            return value === null || value === undefined ? "" : String(value);
+        }
+
+        function renderResult(result) {
+            const columns = result.schema.fields.map((field) => field.name);
+            const rows = result.toArray().map((row) =>
+                typeof row.toJSON === "function" ? row.toJSON() : row
+            );
+            const table = document.createElement("table");
+            const head = table.createTHead().insertRow();
+            const body = table.createTBody();
+
+            for (const column of columns) {
+                const cell = document.createElement("th");
+                cell.textContent = column;
+                head.appendChild(cell);
+            }
+
+            for (const row of rows) {
+                const tableRow = body.insertRow();
+                for (const column of columns) {
+                    const cell = tableRow.insertCell();
+                    cell.textContent = displayValue(row[column]);
+                }
+            }
+
+            resultRoot.replaceChildren(table);
+        }
+
+        async function startDatabase() {
+            const bundles = duckdb.getJsDelivrBundles();
+            const bundle = await duckdb.selectBundle(bundles);
+            const workerUrl = URL.createObjectURL(
+                new Blob([`importScripts("${bundle.mainWorker}");`], {
+                    type: "text/javascript",
+                })
+            );
+
+            worker = new Worker(workerUrl);
+            db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+            try {
+                await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+            } finally {
+                URL.revokeObjectURL(workerUrl);
+            }
+            await db.open({
+                path: databasePath,
+                accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
+                opfs: { fileHandling: "auto" },
+            });
+            connection = await db.connect();
+        }
+
+        async function ensureWeatherTable() {
+            const tableExists = await connection.query(`
+                SELECT count(*) AS table_count
+                FROM information_schema.tables
+                WHERE table_name = '${tableName}'
+            `);
+            const exists = Number(tableExists.toArray()[0].table_count) > 0;
+
+            if (!exists) {
+                const parquetUrl = pageUrl("weather.parquet");
+                await db.registerFileURL(
+                    "weather.parquet",
+                    parquetUrl,
+                    duckdb.DuckDBDataProtocol.HTTP,
+                    false
+                );
+                await connection.query(`
+                    CREATE TABLE ${tableName} AS
+                    SELECT * FROM read_parquet('weather.parquet')
+                `);
+                await connection.query("CHECKPOINT");
+                await db.dropFile("weather.parquet");
+                setStatus("Loaded weather.parquet and checkpointed it to OPFS.");
+            } else {
+                setStatus("Reopened the weather table from OPFS.");
+            }
+        }
+
+        async function runQuery(query, message) {
+            sqlRoot.textContent = query.trim();
+            setStatus(message);
+            const result = await connection.query(query);
+            renderResult(result);
+            setStatus(`${message} Done.`);
+        }
+
+        async function runSummary() {
+            await runQuery(`
+                SELECT
+                    count(*) AS rows,
+                    round(avg(Temp3pm), 1) AS avg_temp_3pm,
+                    round(avg(Humidity3pm), 1) AS avg_humidity_3pm,
+                    sum(CASE WHEN RainTomorrow = 'Yes' THEN 1 ELSE 0 END) AS rain_tomorrow
+                FROM ${tableName}
+            `, "Running the weather summary...");
+        }
+
+        async function runPreview() {
+            await runQuery(`
+                SELECT MinTemp, MaxTemp, Rainfall, Temp3pm, Humidity3pm, RainTomorrow
+                FROM ${tableName}
+                LIMIT 12
+            `, "Reading a preview from the local table...");
+        }
+
+        async function cacheSummary() {
+            const query = `
+                COPY (
+                    SELECT RainTomorrow AS rain_tomorrow,
+                           count(*) AS days,
+                           round(avg(Temp3pm), 1) AS avg_temp_3pm
+                    FROM ${tableName}
+                    GROUP BY ALL
+                    ORDER BY RainTomorrow
+                ) TO 'opfs://cache/rain_summary.parquet'
+                (FORMAT PARQUET)
+            `;
+            await connection.query(query);
+            await connection.query("CHECKPOINT");
+            await runQuery(
+                "SELECT * FROM 'opfs://cache/rain_summary.parquet'",
+                "Wrote and reopened the derived Parquet cache..."
+            );
+        }
+
+        async function resetDatabase() {
+            await connection.query(`DROP TABLE IF EXISTS ${tableName}`);
+            await connection.query("CHECKPOINT");
+            await ensureWeatherTable();
+            await runSummary();
+        }
+
+        function setBusy(isBusy) {
+            for (const button of buttons) {
+                button.disabled = isBusy;
+            }
+        }
+
+        async function runAction(action) {
+            setBusy(true);
+            try {
+                await action();
+            } catch (error) {
+                console.error(error);
+                setStatus(error instanceof Error ? error.message : String(error), "error");
+            } finally {
+                setBusy(false);
+            }
+        }
+
+        document.getElementById("summary-button").addEventListener("click", () => runAction(runSummary));
+        document.getElementById("preview-button").addEventListener("click", () => runAction(runPreview));
+        document.getElementById("cache-button").addEventListener("click", () => runAction(cacheSummary));
+        document.getElementById("reset-button").addEventListener("click", () => runAction(resetDatabase));
+
+        try {
+            await startDatabase();
+            await ensureWeatherTable();
+            await runSummary();
+        } catch (error) {
+            console.error(error);
+            setStatus(error instanceof Error ? error.message : String(error), "error");
+        }
+    </script>
+</body>
+</html>
